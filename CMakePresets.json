@@ -1,0 +1,110 @@
+{
+  "version": 4,
+  "configurePresets": [
+    {
+      "name": "windows-clang-cl-base",
+      "hidden": true,
+      "displayName": "Windows x64 (Clang-cl) Base",
+      "description": "Базовый пресет Windows для clang-cl",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-clang-cl",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "toolset": {
+        "value": "ClangCL",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT": "Embedded"
+      },
+      "vendor": {
+        "Microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "intelliSenseMode": "windows-clangcl-x64"
+        }
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-msvc-cuda-base",
+      "hidden": false,
+      "displayName": "Windows x64 (MSVC + CUDA)",
+      "description": "Рабочий Windows-пресет с CUDA через nvcc. Запускать из x64 Native Tools Command Prompt for VS 2022.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-msvc-cuda",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT": "Embedded",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+
+        "ENABLE_CUDA": "ON",
+        "CMAKE_CUDA_ARCHITECTURES": "native",
+        "CMAKE_CUDA_HOST_COMPILER": "cl"
+      },
+      "vendor": {
+        "Microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "intelliSenseMode": "windows-msvc-x64"
+        }
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux-clang",
+      "displayName": "Linux x64 (Clang)",
+      "description": "Готовый пресет Linux — работает сразу из коробки",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-clang",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "vendor": {
+        "://microsoft.com": {
+          "intelliSenseMode": "linux-clang-x64"
+        }
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-clang-cuda",
+      "displayName": "Linux x64 (Clang + CUDA)",
+      "description": "Linux: C++ компилит clang++, а host-часть для CUDA-ядер компилит g++ (через nvcc)",
+      "inherits": "linux-clang",
+      "binaryDir": "${sourceDir}/build/linux-clang-cuda",
+      "cacheVariables": {
+        "CMAKE_CUDA_HOST_COMPILER": "clang++",
+        "CMAKE_CUDA_ARCHITECTURES": "native",
+        "ENABLE_CUDA": "ON"
+      },
+      "vendor": {
+        "Microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "intelliSenseMode": "linux-clang-x64"
+        }
+      }
+    }
+  ]
+}

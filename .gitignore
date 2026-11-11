@@ -1,0 +1,19 @@
+# Сборка и временные файлы
+build/
+out/
+
+# Личные пресеты CMake
+CMakeUserPresets.json
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.VC.db
+
+# VS Code
+.vscode/
+
+# Clang-Formatting in VS Code
+.clang-format
+.clangd

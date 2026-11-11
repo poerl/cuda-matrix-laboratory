@@ -1,0 +1,14 @@
+{
+  "version": 4,
+  "configurePresets": [
+    {
+      "name": "windows-clang-cl",
+      "displayName": "Windows x64 (Clang-cl)",
+      "description": "Моя сборка с путем к Qt",
+      "inherits": "windows-clang-cl-base",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "D:/Programs/Qt/6.11.2/msvc2022_64"
+      }
+    }
+  ]
+}
