@@ -3,6 +3,7 @@
 
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -14,7 +15,7 @@ __global__ void generateMatrixKernel(
 ) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= elementCount) return;
-    
+
     curandStatePhilox4_32_10_t state;
     curand_init(seed, idx, 0, &state);
     output[idx] = curand_uniform_double(&state) * 2000.0 - 1000.0;
@@ -22,45 +23,59 @@ __global__ void generateMatrixKernel(
 
 constexpr int TILE_SIZE = 16;
 
+
 __global__ void multiplyMatricesTiledKernel(
     const double* A,
     const double* B,
     double* C,
     int rowsA,
     int colsA,
-    int colsB
+    int colsB,
+    int tilesX,
+    int tilesY
 ) {
     __shared__ double tileA[TILE_SIZE][TILE_SIZE];
     __shared__ double tileB[TILE_SIZE][TILE_SIZE];
 
-    int row = blockIdx.y * TILE_SIZE + threadIdx.y;
-    int col = blockIdx.x * TILE_SIZE + threadIdx.x;
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    const int tileCount = (colsA + TILE_SIZE - 1) / TILE_SIZE;
+    const int totalTiles = tilesX * tilesY;
 
-    double sum = 0.0;
-    int tileCount = (colsA + TILE_SIZE - 1) / TILE_SIZE;
+    for (int tileIdx = blockIdx.x; tileIdx < totalTiles; tileIdx += gridDim.x) {
+        const int tileRow = tileIdx / tilesX;
+        const int tileCol = tileIdx % tilesX;
 
-    for (int t = 0; t < tileCount; t++) {
-        int aCol = t * TILE_SIZE + threadIdx.x;
-        int bRow = t * TILE_SIZE + threadIdx.y;
+        const int row = tileRow * TILE_SIZE + ty;
+        const int col = tileCol * TILE_SIZE + tx;
 
-        tileA[threadIdx.y][threadIdx.x] = 
-            (row < rowsA && aCol < colsA) ? A[row * colsA + aCol] : 0.0;
-        
-        tileB[threadIdx.y][threadIdx.x] = 
-            (bRow < colsA && col < colsB) ? B[bRow * colsB + col] : 0.0;
+        double sum = 0.0;
 
-        __syncthreads();
+        for (int t = 0; t < tileCount; t++) {
+            const int aCol = t * TILE_SIZE + tx;
+            const int bRow = t * TILE_SIZE + ty;
 
-        #pragma unroll
-        for (int k = 0; k < TILE_SIZE; k++) {
-            sum += tileA[threadIdx.y][k] * tileB[k][threadIdx.x];
+            tileA[ty][tx] =
+                (row < rowsA && aCol < colsA) ? A[row * colsA + aCol] : 0.0;
+
+            tileB[ty][tx] =
+                (bRow < colsA && col < colsB) ? B[bRow * colsB + col] : 0.0;
+
+            __syncthreads();
+
+            #pragma unroll
+            for (int k = 0; k < TILE_SIZE; k++) {
+                sum += tileA[ty][k] * tileB[k][tx];
+            }
+
+            __syncthreads();
+        }
+
+        if (row < rowsA && col < colsB) {
+            C[row * colsB + col] = sum;
         }
 
         __syncthreads();
-    }
-
-    if (row < rowsA && col < colsB) {
-        C[row * colsB + col] = sum;
     }
 }
 
@@ -68,14 +83,14 @@ __global__ void multiplyMatricesTiledKernel(
 CudaComputer::CudaComputer() {
     int deviceCount = 0;
     checkCuda(cudaGetDeviceCount(&deviceCount), "cudaGetDeviceCount");
-    
+
     if (deviceCount == 0) {
         throw std::runtime_error("No CUDA-capable GPU found");
     }
 
-    cudaSetDevice(0);
+    checkCuda(cudaSetDevice(0), "cudaSetDevice");
     checkCuda(cudaGetDeviceProperties(&deviceProps_, 0), "cudaGetDeviceProperties");
-    
+
     blockSizeThreads_ = std::min(256u, static_cast<uint32_t>(deviceProps_.maxThreadsPerBlock));
 }
 
@@ -85,19 +100,20 @@ std::unique_ptr<IArray2D> CudaComputer::genMatrix(size_t rows, size_t cols) {
 
     size_t elementCount = rows * cols;
     double* deviceData = nullptr;
-    
+
     checkCuda(cudaMalloc(&deviceData, elementCount * sizeof(double)), "cudaMalloc");
 
     int gridSize = (elementCount + blockSizeThreads_ - 1) / blockSizeThreads_;
-    
+
     generateMatrixKernel<<<gridSize, blockSizeThreads_>>>(
         deviceData, elementCount, masterSeed_
     );
-    
+
+    checkCuda(cudaGetLastError(), "generateMatrixKernel launch");
     checkCuda(cudaDeviceSynchronize(), "generateMatrixKernel");
-    checkCuda(cudaMemcpy(matrix->getData().data(), deviceData, 
+    checkCuda(cudaMemcpy(matrix->getData().data(), deviceData,
                          elementCount * sizeof(double), cudaMemcpyDeviceToHost), "cudaMemcpy");
-    
+
     cudaFree(deviceData);
     return matrix;
 }
@@ -116,7 +132,7 @@ std::unique_ptr<IArray2D> CudaComputer::mulMatrixes(
     int rowsA = matrixA->getRows();
     int colsA = matrixA->getCols();
     int colsB = matrixB->getCols();
-    
+
     auto result = Array2D::create(rowsA, colsB, 0.0);
     if (rowsA == 0 || colsB == 0) return result;
 
@@ -125,7 +141,7 @@ std::unique_ptr<IArray2D> CudaComputer::mulMatrixes(
     size_t sizeC = rowsA * colsB * sizeof(double);
 
     double *deviceA = nullptr, *deviceB = nullptr, *deviceC = nullptr;
-    
+
     checkCuda(cudaMalloc(&deviceA, sizeA), "cudaMalloc A");
     checkCuda(cudaMalloc(&deviceB, sizeB), "cudaMalloc B");
     checkCuda(cudaMalloc(&deviceC, sizeC), "cudaMalloc C");
@@ -133,18 +149,35 @@ std::unique_ptr<IArray2D> CudaComputer::mulMatrixes(
     checkCuda(cudaMemcpy(deviceA, matrixA->getData().data(), sizeA, cudaMemcpyHostToDevice), "copy A");
     checkCuda(cudaMemcpy(deviceB, matrixB->getData().data(), sizeB, cudaMemcpyHostToDevice), "copy B");
 
-    dim3 block(TILE_SIZE, TILE_SIZE);
-    dim3 grid((colsB + TILE_SIZE - 1) / TILE_SIZE, (rowsA + TILE_SIZE - 1) / TILE_SIZE);
+    const int tilesX = (colsB + TILE_SIZE - 1) / TILE_SIZE;
+    const int tilesY = (rowsA + TILE_SIZE - 1) / TILE_SIZE;
+    const size_t totalTiles = static_cast<size_t>(tilesX) * tilesY;
 
-    multiplyMatricesTiledKernel<<<grid, block>>>(deviceA, deviceB, deviceC, rowsA, colsA, colsB);
-    
+    // Сколько блоков GPU держит одновременно (оценка по потокам на SM).
+    constexpr unsigned TILE_THREADS = TILE_SIZE * TILE_SIZE; // 256
+    unsigned blocksPerSM = deviceProps_.maxThreadsPerMultiProcessor / TILE_THREADS;
+    if (blocksPerSM == 0) blocksPerSM = 1;
+    const size_t residentCapacity =
+        static_cast<size_t>(deviceProps_.multiProcessorCount) * blocksPerSM;
+
+    size_t blocks = residentCapacity * blockSizeThreads_ / TILE_THREADS;
+    blocks = std::max<size_t>(1, std::min(blocks, totalTiles));
+
+    dim3 block(TILE_SIZE, TILE_SIZE);
+    dim3 grid(static_cast<unsigned>(blocks));
+
+    multiplyMatricesTiledKernel<<<grid, block>>>(
+        deviceA, deviceB, deviceC, rowsA, colsA, colsB, tilesX, tilesY
+    );
+
+    checkCuda(cudaGetLastError(), "multiplyMatricesTiledKernel launch");
     checkCuda(cudaDeviceSynchronize(), "multiplyMatricesTiledKernel");
     checkCuda(cudaMemcpy(result->getData().data(), deviceC, sizeC, cudaMemcpyDeviceToHost), "copy C");
 
     cudaFree(deviceA);
     cudaFree(deviceB);
     cudaFree(deviceC);
-    
+
     return result;
 }
 

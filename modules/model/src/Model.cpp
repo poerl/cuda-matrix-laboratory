@@ -218,7 +218,7 @@ void Model::benchmark() {
         return;
 
     benchNodes.clear();
-    static const size_t blockThreads[] {1024, 512, 256, 128, 64, 32};
+    static const size_t blockThreads[] {256, 128, 64, 32};
     unsetReady();
    
     if (computer->isCPU()) {
